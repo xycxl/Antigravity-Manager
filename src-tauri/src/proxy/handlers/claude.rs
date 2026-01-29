@@ -115,6 +115,10 @@ pub async fn handle_messages(
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
+    // [FIX] 保存原始请求体的完整副本，用于日志记录
+    // 这确保了即使结构体定义遗漏字段，日志也能完整记录所有参数
+    let original_body = body.clone();
+    
     tracing::debug!("handle_messages called. Body JSON len: {}", body.to_string().len());
     
     // 生成随机 Trace ID 用户追踪
@@ -147,12 +151,13 @@ pub async fn handle_messages(
     };
 
     if debug_logger::is_enabled(&debug_cfg) {
+        // [FIX] 使用原始 body 副本记录日志，确保不丢失任何字段
         let original_payload = json!({
             "kind": "original_request",
             "protocol": "anthropic",
             "trace_id": trace_id,
             "original_model": request.model,
-            "request": serde_json::to_value(&request).unwrap_or(json!({})),
+            "request": original_body,  // 使用原始请求体，不是结构体序列化
         });
         debug_logger::write_debug_payload(&debug_cfg, Some(&trace_id), "original_request", &original_payload).await;
     }

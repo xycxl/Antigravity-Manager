@@ -33,6 +33,13 @@ pub fn transform_openai_request(
     let is_claude_thinking = mapped_model_lower.ends_with("-thinking");
     let is_thinking_model = is_gemini_3_thinking || is_claude_thinking;
 
+    // [NEW] 检查用户是否在请求中显式启用 thinking
+    let user_enabled_thinking = request.thinking.as_ref()
+        .map(|t| t.thinking_type.as_deref() == Some("enabled"))
+        .unwrap_or(false);
+    let user_thinking_budget = request.thinking.as_ref()
+        .and_then(|t| t.budget_tokens);
+
     // [NEW] 检查历史消息是否兼容思维模型 (是否有 Assistant 消息缺失 reasoning_content)
     let has_incompatible_assistant_history = request.messages.iter().any(|msg| {
         msg.role == "assistant"
@@ -47,11 +54,21 @@ pub fn transform_openai_request(
     let global_thought_sig = get_thought_signature();
 
     // [NEW] 决定是否开启 Thinking 功能:
+    // 1. 模型名包含 -thinking 时自动开启
+    // 2. 用户在请求中显式设置 thinking.type = "enabled" 时开启
     // 如果是 Claude 思考模型且历史不兼容且没有可用签名来占位, 则禁用 Thinking 以防 400
-    let mut actual_include_thinking = is_thinking_model;
+    let mut actual_include_thinking = is_thinking_model || user_enabled_thinking;
     if is_claude_thinking && has_incompatible_assistant_history && global_thought_sig.is_none() {
         tracing::warn!("[OpenAI-Thinking] Incompatible assistant history detected for Claude thinking model without global signature. Disabling thinking for this request to avoid 400 error.");
         actual_include_thinking = false;
+    }
+    
+    // [NEW] 日志：用户显式设置 thinking
+    if user_enabled_thinking {
+        tracing::info!(
+            "[OpenAI-Thinking] User explicitly enabled thinking with budget: {:?}",
+            user_thinking_budget
+        );
     }
 
     tracing::debug!(
@@ -376,7 +393,8 @@ pub fn transform_openai_request(
 
     // 为 thinking 模型注入 thinkingConfig (使用 thinkingBudget 而非 thinkingLevel)
     if actual_include_thinking {
-        let budget = 32000;
+        // [NEW] 优先使用用户指定的 budget，否则使用默认值
+        let budget: i64 = user_thinking_budget.map(|b| b as i64).unwrap_or(32000);
         gen_config["thinkingConfig"] = json!({
             "includeThoughts": true,
             "thinkingBudget": budget
@@ -395,8 +413,8 @@ pub fn transform_openai_request(
         }
         
         tracing::debug!(
-            "[OpenAI-Request] Injected thinkingConfig for model {}: thinkingBudget={}",
-            mapped_model, budget
+            "[OpenAI-Request] Injected thinkingConfig for model {}: thinkingBudget={} (user_specified={})",
+            mapped_model, budget, user_thinking_budget.is_some()
         );
     }
 
@@ -640,6 +658,7 @@ mod tests {
             size: None,
             quality: None,
             person_generation: None,
+            thinking: None,
         };
 
         let result = transform_openai_request(&req, "test-v", "gemini-1.5-flash");
@@ -679,6 +698,7 @@ mod tests {
             size: None,
             quality: None,
             person_generation: None,
+            thinking: None,
         };
 
         let result = transform_openai_request(&req, "test-p", "gemini-3-pro-high-thinking");

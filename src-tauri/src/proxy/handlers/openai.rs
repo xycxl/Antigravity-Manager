@@ -25,6 +25,10 @@ pub async fn handle_chat_completions(
     State(state): State<AppState>,
     Json(mut body): Json<Value>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
+    // [FIX] 保存原始请求体的完整副本，用于日志记录
+    // 这确保了即使结构体定义遗漏字段，日志也能完整记录所有参数
+    let original_body = body.clone();
+
     // [NEW] 自动检测并转换 Responses 格式
     // 如果请求包含 instructions 或 input 但没有 messages，则认为是 Responses 格式
     let is_responses_format = !body.get("messages").is_some()
@@ -101,12 +105,13 @@ pub async fn handle_chat_completions(
     );
     let debug_cfg = state.debug_logging.read().await.clone();
     if debug_logger::is_enabled(&debug_cfg) {
+        // [FIX] 使用原始 body 副本记录日志，确保不丢失任何字段
         let original_payload = json!({
             "kind": "original_request",
             "protocol": "openai",
             "trace_id": trace_id,
             "original_model": openai_req.model,
-            "request": serde_json::to_value(&openai_req).unwrap_or(json!({})),
+            "request": original_body,  // 使用原始请求体，不是结构体序列化
         });
         debug_logger::write_debug_payload(&debug_cfg, Some(&trace_id), "original_request", &original_payload).await;
     }

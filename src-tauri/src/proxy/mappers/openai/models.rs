@@ -37,6 +37,18 @@ pub struct OpenAIRequest {
     pub quality: Option<String>,
     #[serde(default, rename = "personGeneration")]
     pub person_generation: Option<String>,
+    // [NEW] Thinking/Extended Thinking 支持 (兼容 Anthropic/Claude 协议)
+    #[serde(default)]
+    pub thinking: Option<ThinkingConfig>,
+}
+
+/// Thinking 配置 (兼容 Anthropic 和 OpenAI 扩展协议)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThinkingConfig {
+    #[serde(rename = "type")]
+    pub thinking_type: Option<String>, // "enabled" or "disabled"
+    #[serde(rename = "budget_tokens")]
+    pub budget_tokens: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
