@@ -5,6 +5,25 @@ use futures::StreamExt;
 
 use crate::proxy::config::DebugLoggingConfig;
 
+/// Token 使用量统计结构体
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct TokenUsage {
+    pub input_tokens: u32,
+    pub output_tokens: u32,
+    pub cached_tokens: u32,
+    pub total_tokens: u32,
+}
+
+/// 获取 ISO 8601 格式时间戳
+pub fn get_iso_timestamp() -> String {
+    chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
+}
+
+/// 计算请求耗时（毫秒）
+pub fn calculate_duration_ms(start_time: std::time::Instant) -> u64 {
+    start_time.elapsed().as_millis() as u64
+}
+
 fn build_filename(prefix: &str, trace_id: Option<&str>) -> String {
     let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S%.3f");
     let tid = trace_id.unwrap_or("unknown");
@@ -63,10 +82,19 @@ pub fn is_enabled(cfg: &DebugLoggingConfig) -> bool {
     cfg.enabled
 }
 
-/// 解析 SSE 流式数据，提取 thinking 和正文内容
-fn parse_sse_stream(raw: &str) -> (String, String) {
+
+/// SSE 解析结果结构体
+struct ParsedSseResult {
+    thinking_content: String,
+    response_content: String,
+    token_usage: Option<TokenUsage>,
+}
+
+/// 解析 SSE 流式数据，提取 thinking、正文内容和 token 统计
+fn parse_sse_stream(raw: &str) -> ParsedSseResult {
     let mut thinking_parts: Vec<String> = Vec::new();
     let mut content_parts: Vec<String> = Vec::new();
+    let mut final_usage: Option<TokenUsage> = None;
 
     for line in raw.lines() {
         let line = line.trim();
@@ -81,28 +109,51 @@ fn parse_sse_stream(raw: &str) -> (String, String) {
         // 尝试解析 JSON
         if let Ok(parsed) = serde_json::from_str::<Value>(json_str) {
             // Gemini/v1internal 格式: response.candidates[0].content.parts[0]
-            if let Some(candidates) = parsed.get("response")
-                .and_then(|r| r.get("candidates"))
-                .and_then(|c| c.as_array())
-            {
-                for candidate in candidates {
-                    if let Some(parts) = candidate.get("content")
-                        .and_then(|c| c.get("parts"))
-                        .and_then(|p| p.as_array())
-                    {
-                        for part in parts {
-                            let text = part.get("text")
-                                .and_then(|t| t.as_str())
-                                .unwrap_or("");
-                            let is_thought = part.get("thought")
-                                .and_then(|t| t.as_bool())
-                                .unwrap_or(false);
-                            
-                            if !text.is_empty() {
-                                if is_thought {
-                                    thinking_parts.push(text.to_string());
-                                } else {
-                                    content_parts.push(text.to_string());
+            if let Some(response) = parsed.get("response") {
+                // 解析 usageMetadata
+                if let Some(usage) = response.get("usageMetadata") {
+                    let input = usage.get("promptTokenCount")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0) as u32;
+                    let output = usage.get("candidatesTokenCount")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0) as u32;
+                    let cached = usage.get("cachedContentTokenCount")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0) as u32;
+                    let total = usage.get("totalTokenCount")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0) as u32;
+                    
+                    final_usage = Some(TokenUsage {
+                        input_tokens: input,
+                        output_tokens: output,
+                        cached_tokens: cached,
+                        total_tokens: total,
+                    });
+                }
+                
+                // 解析内容
+                if let Some(candidates) = response.get("candidates").and_then(|c| c.as_array()) {
+                    for candidate in candidates {
+                        if let Some(parts) = candidate.get("content")
+                            .and_then(|c| c.get("parts"))
+                            .and_then(|p| p.as_array())
+                        {
+                            for part in parts {
+                                let text = part.get("text")
+                                    .and_then(|t| t.as_str())
+                                    .unwrap_or("");
+                                let is_thought = part.get("thought")
+                                    .and_then(|t| t.as_bool())
+                                    .unwrap_or(false);
+                                
+                                if !text.is_empty() {
+                                    if is_thought {
+                                        thinking_parts.push(text.to_string());
+                                    } else {
+                                        content_parts.push(text.to_string());
+                                    }
                                 }
                             }
                         }
@@ -124,7 +175,11 @@ fn parse_sse_stream(raw: &str) -> (String, String) {
         }
     }
 
-    (thinking_parts.join(""), content_parts.join(""))
+    ParsedSseResult {
+        thinking_content: thinking_parts.join(""),
+        response_content: content_parts.join(""),
+        token_usage: final_usage,
+    }
 }
 
 pub fn wrap_reqwest_stream_with_debug(
@@ -139,6 +194,7 @@ pub fn wrap_reqwest_stream_with_debug(
     }
 
     let wrapped = async_stream::stream! {
+        let start_time = std::time::Instant::now();
         let mut collected: Vec<u8> = Vec::new();
         let mut inner = stream;
         while let Some(item) = inner.next().await {
@@ -148,24 +204,38 @@ pub fn wrap_reqwest_stream_with_debug(
             yield item;
         }
 
+        let duration_ms = calculate_duration_ms(start_time);
+        let timestamp = get_iso_timestamp();
         let raw_text = String::from_utf8_lossy(&collected).to_string();
-        let (thinking_content, response_content) = parse_sse_stream(&raw_text);
+        let parsed = parse_sse_stream(&raw_text);
         
         let mut payload = serde_json::json!({
             "kind": "upstream_response",
             "trace_id": trace_id,
+            "timestamp": timestamp,
+            "duration_ms": duration_ms,
             "meta": meta,
         });
         
-        // 只有在有内容时才添加对应字段
-        if !thinking_content.is_empty() {
-            payload["thinking_content"] = serde_json::Value::String(thinking_content);
+        // 添加 thinking 内容（如果有）
+        if !parsed.thinking_content.is_empty() {
+            payload["thinking_content"] = serde_json::Value::String(parsed.thinking_content);
         }
-        if !response_content.is_empty() {
-            payload["response_content"] = serde_json::Value::String(response_content);
+        // 添加响应内容（如果有）
+        if !parsed.response_content.is_empty() {
+            payload["response_content"] = serde_json::Value::String(parsed.response_content);
+        }
+        // 添加 token 统计（如果有）
+        if let Some(usage) = parsed.token_usage {
+            payload["token_usage"] = serde_json::json!({
+                "input_tokens": usage.input_tokens,
+                "output_tokens": usage.output_tokens,
+                "cached_tokens": usage.cached_tokens,
+                "total_tokens": usage.total_tokens,
+            });
         }
 
-        write_debug_payload(&cfg, Some(&payload["trace_id"].as_str().unwrap_or("unknown")), prefix, &payload).await;
+        write_debug_payload(&cfg, Some(&trace_id), prefix, &payload).await;
     };
 
     Box::pin(wrapped)

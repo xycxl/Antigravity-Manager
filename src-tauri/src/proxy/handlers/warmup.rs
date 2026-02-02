@@ -183,9 +183,11 @@ pub async fn handle_warmup(
 
     // ===== 步骤 4: 处理响应 =====
     match result {
-        Ok(response) => {
+        Ok(upstream_resp) => {
+            // 解构 UpstreamResponse
+            let response = upstream_resp.response;
             let status = response.status();
-            let mut response = if status.is_success() {
+            let mut final_response = if status.is_success() {
                 info!(
                     "[Warmup-API] ========== SUCCESS: {} / {} ==========",
                     req.email, req.model
@@ -215,13 +217,13 @@ pub async fn handle_warmup(
 
             // 添加响应头，让监控中间件捕获账号信息
             if let Ok(email_val) = axum::http::HeaderValue::from_str(&req.email) {
-                response.headers_mut().insert("X-Account-Email", email_val);
+                final_response.headers_mut().insert("X-Account-Email", email_val);
             }
             if let Ok(model_val) = axum::http::HeaderValue::from_str(&req.model) {
-                response.headers_mut().insert("X-Mapped-Model", model_val);
+                final_response.headers_mut().insert("X-Mapped-Model", model_val);
             }
             
-            response
+            final_response
         }
         Err(e) => {
             warn!(

@@ -23,6 +23,21 @@ pub struct UpstreamClient {
     user_agent_override: RwLock<Option<String>>,
 }
 
+/// 上游响应包装结构体
+/// 
+/// 包含 HTTP 响应及调试所需的元信息
+#[derive(Debug)]
+pub struct UpstreamResponse {
+    /// 原始 HTTP 响应
+    pub response: Response,
+    /// 最终使用的 API 端点 URL
+    pub endpoint_url: String,
+    /// 端点切换路径（记录 fallback 过程）
+    pub fallback_path: Vec<String>,
+    /// 请求开始时间（用于计算耗时）
+    pub start_time: std::time::Instant,
+}
+
 impl UpstreamClient {
     pub fn new(proxy_config: Option<crate::proxy::config::UpstreamProxyConfig>) -> Self {
         let mut builder = Client::builder()
@@ -98,11 +113,13 @@ impl UpstreamClient {
         access_token: &str,
         body: Value,
         query_string: Option<&str>,
-    ) -> Result<Response, String> {
+    ) -> Result<UpstreamResponse, String> {
         self.call_v1_internal_with_headers(method, access_token, body, query_string, std::collections::HashMap::new()).await
     }
 
     /// [FIX #765] 调用 v1internal API，支持透传额外的 Headers
+    /// 
+    /// 返回 UpstreamResponse 结构体，包含端点 URL 和 fallback 路径信息
     pub async fn call_v1_internal_with_headers(
         &self,
         method: &str,
@@ -110,7 +127,11 @@ impl UpstreamClient {
         body: Value,
         query_string: Option<&str>,
         extra_headers: std::collections::HashMap<String, String>,
-    ) -> Result<Response, String> {
+    ) -> Result<UpstreamResponse, String> {
+        // 记录请求开始时间
+        let start_time = std::time::Instant::now();
+        // 记录 fallback 路径
+        let mut fallback_path: Vec<String> = Vec::new();
         // 构建 Headers (所有端点复用)
         let mut headers = header::HeaderMap::new();
         headers.insert(
@@ -171,7 +192,12 @@ impl UpstreamClient {
                         } else {
                             tracing::debug!("✓ Upstream request succeeded | Endpoint: {} | Status: {}", base_url, status);
                         }
-                        return Ok(resp);
+                        return Ok(UpstreamResponse {
+                            response: resp,
+                            endpoint_url: url.clone(),
+                            fallback_path: fallback_path.clone(),
+                            start_time,
+                        });
                     }
 
                     // 如果有下一个端点且当前错误可重试，则切换
@@ -182,12 +208,18 @@ impl UpstreamClient {
                             base_url,
                             method
                         );
+                        fallback_path.push(format!("{} -> {} (fallback)", base_url, status));
                         last_err = Some(format!("Upstream {} returned {}", base_url, status));
                         continue;
                     }
 
                     // 不可重试的错误或已是最后一个端点，直接返回
-                    return Ok(resp);
+                    return Ok(UpstreamResponse {
+                        response: resp,
+                        endpoint_url: url.clone(),
+                        fallback_path: fallback_path.clone(),
+                        start_time,
+                    });
                 }
                 Err(e) => {
                     let msg = format!("HTTP request failed at {}: {}", base_url, e);

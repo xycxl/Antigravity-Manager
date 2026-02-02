@@ -152,11 +152,16 @@ pub async fn handle_messages(
 
     if debug_logger::is_enabled(&debug_cfg) {
         // [FIX] 使用原始 body 副本记录日志，确保不丢失任何字段
+        let client_user_agent = headers.get("user-agent")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("unknown");
         let original_payload = json!({
             "kind": "original_request",
             "protocol": "anthropic",
             "trace_id": trace_id,
+            "timestamp": debug_logger::get_iso_timestamp(),
             "original_model": request.model,
+            "client_user_agent": client_user_agent,
             "request": original_body,  // 使用原始请求体，不是结构体序列化
         });
         debug_logger::write_debug_payload(&debug_cfg, Some(&trace_id), "original_request", &original_payload).await;
@@ -494,6 +499,7 @@ pub async fn handle_messages(
         // Layer 3 (90%): Fork conversation + XML summary - Ultimate optimization
         let mut is_purified = false;
         let mut compression_applied = false;
+        let mut compression_layer: u8 = 0;  // 0=无压缩, 1=Layer1, 2=Layer2, 3=Layer3
         
         if !retried_without_thinking && scaling_enabled {  // 新增 scaling_enabled 联动判断
             // 1. Determine context limit (Flash: ~1M, Pro: ~2M)
@@ -524,6 +530,7 @@ pub async fn handle_messages(
                         trace_id, usage_ratio * 100.0, threshold_l1 * 100.0
                     );
                     compression_applied = true;
+                    compression_layer = 1;
                     
                     // Re-estimate after trimming (with calibration)
                     let new_raw = ContextManager::estimate_token_usage(&request_with_mapped);
@@ -564,6 +571,7 @@ pub async fn handle_messages(
                 ) {
                     is_purified = true; // Still breaks cache, but preserves signatures
                     compression_applied = true;
+                    compression_layer = 2;
                     
                     let new_raw = ContextManager::estimate_token_usage(&request_with_mapped);
                     let new_usage = calibrator.calibrate(new_raw);
@@ -601,6 +609,7 @@ pub async fn handle_messages(
                         
                         request_with_mapped = forked_request;
                         is_purified = false; // Fork doesn't break cache!
+                        compression_layer = 3;
                         
                         // Re-estimate after fork (with calibration)
                         let new_raw = ContextManager::estimate_token_usage(&request_with_mapped);
@@ -677,10 +686,18 @@ pub async fn handle_messages(
                 "kind": "v1internal_request",
                 "protocol": "anthropic",
                 "trace_id": trace_id,
+                "timestamp": debug_logger::get_iso_timestamp(),
                 "original_model": request.model,
                 "mapped_model": request_with_mapped.model,
                 "request_type": config.request_type,
                 "attempt": attempt,
+                "account_email": email,
+                "project_id": project_id,
+                "session_id": session_id_str,
+                "message_count": request_with_mapped.messages.len(),
+                "context_purified": is_purified,
+                "compression_layer": compression_layer,
+                "background_task_downgrade": background_task_type.is_some(),
                 "v1internal_request": gemini_body.clone(),
             });
             debug_logger::write_debug_payload(&debug_cfg, Some(&trace_id), "v1internal_request", &payload).await;
@@ -706,7 +723,7 @@ pub async fn handle_messages(
         }
 
         // 5. 上游调用
-        let response = match upstream
+        let upstream_resp = match upstream
             .call_v1_internal_with_headers(method, &access_token, gemini_body, query, extra_headers.clone())
             .await {
             Ok(r) => r,
@@ -716,6 +733,12 @@ pub async fn handle_messages(
                 continue;
             }
         };
+        
+        // 解构 UpstreamResponse 获取端点信息
+        let endpoint_url = upstream_resp.endpoint_url.clone();
+        let fallback_path = upstream_resp.fallback_path.clone();
+        let request_start_time = upstream_resp.start_time;
+        let response = upstream_resp.response;
         
         let status = response.status();
         last_status = status;
@@ -738,6 +761,17 @@ pub async fn handle_messages(
                     "request_type": config.request_type,
                     "attempt": attempt,
                     "status": status.as_u16(),
+                    "endpoint_url": endpoint_url,
+                    "fallback_path": fallback_path,
+                    "account_email": email,
+                    "method": method,
+                    "query_string": query.unwrap_or(""),
+                    "force_stream_internally": force_stream_internally,
+                    "extra_headers": extra_headers,
+                    "session_id": session_id_str,
+                    "message_count": request_with_mapped.messages.len(),
+                    "context_purified": is_purified,
+                    "compression_layer": compression_layer,
                 });
                 let gemini_stream = debug_logger::wrap_reqwest_stream_with_debug(
                     Box::pin(response.bytes_stream()),

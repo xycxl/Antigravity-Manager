@@ -23,6 +23,7 @@ use tokio::time::Duration;
 
 pub async fn handle_chat_completions(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Json(mut body): Json<Value>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     // [FIX] 保存原始请求体的完整副本，用于日志记录
@@ -106,11 +107,16 @@ pub async fn handle_chat_completions(
     let debug_cfg = state.debug_logging.read().await.clone();
     if debug_logger::is_enabled(&debug_cfg) {
         // [FIX] 使用原始 body 副本记录日志，确保不丢失任何字段
+        let client_user_agent = headers.get("user-agent")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("unknown");
         let original_payload = json!({
             "kind": "original_request",
             "protocol": "openai",
             "trace_id": trace_id,
+            "timestamp": debug_logger::get_iso_timestamp(),
             "original_model": openai_req.model,
+            "client_user_agent": client_user_agent,
             "request": original_body,  // 使用原始请求体，不是结构体序列化
         });
         debug_logger::write_debug_payload(&debug_cfg, Some(&trace_id), "original_request", &original_payload).await;
@@ -184,10 +190,15 @@ pub async fn handle_chat_completions(
                 "kind": "v1internal_request",
                 "protocol": "openai",
                 "trace_id": trace_id,
+                "timestamp": debug_logger::get_iso_timestamp(),
                 "original_model": openai_req.model,
                 "mapped_model": mapped_model,
                 "request_type": config.request_type,
                 "attempt": attempt,
+                "account_email": email,
+                "project_id": project_id,
+                "session_id": session_id,
+                "message_count": openai_req.messages.len(),
                 "v1internal_request": gemini_body.clone(),
             });
             debug_logger::write_debug_payload(&debug_cfg, Some(&trace_id), "v1internal_request", &payload).await;
@@ -217,7 +228,7 @@ pub async fn handle_chat_completions(
         };
         let query_string = if actual_stream { Some("alt=sse") } else { None };
 
-        let response = match upstream
+        let upstream_resp = match upstream
             .call_v1_internal(method, &access_token, gemini_body, query_string)
             .await
         {
@@ -233,6 +244,11 @@ pub async fn handle_chat_completions(
                 continue;
             }
         };
+
+        // 解构 UpstreamResponse 获取端点信息
+        let endpoint_url = upstream_resp.endpoint_url.clone();
+        let fallback_path = upstream_resp.fallback_path.clone();
+        let response = upstream_resp.response;
 
         let status = response.status();
         if status.is_success() {
@@ -251,6 +267,14 @@ pub async fn handle_chat_completions(
                     "request_type": config.request_type,
                     "attempt": attempt,
                     "status": status.as_u16(),
+                    "endpoint_url": endpoint_url,
+                    "fallback_path": fallback_path,
+                    "account_email": email,
+                    "method": method,
+                    "query_string": query_string.unwrap_or(""),
+                    "force_stream_internally": force_stream_internally,
+                    "session_id": session_id,
+                    "message_count": openai_req.messages.len(),
                 });
                 let gemini_stream = debug_logger::wrap_reqwest_stream_with_debug(
                     Box::pin(response.bytes_stream()),
@@ -1069,7 +1093,7 @@ pub async fn handle_completions(
         };
         let query_string = if list_response { Some("alt=sse") } else { None };
 
-        let response = match upstream
+        let upstream_resp = match upstream
             .call_v1_internal(method, &access_token, gemini_body, query_string)
             .await
         {
@@ -1085,6 +1109,9 @@ pub async fn handle_completions(
                 continue;
             }
         };
+
+        // 解构 UpstreamResponse
+        let response = upstream_resp.response;
 
         let status = response.status();
         if status.is_success() {
@@ -1555,7 +1582,8 @@ pub async fn handle_images_generations(
                 .call_v1_internal("generateContent", &access_token, gemini_body, None)
                 .await
             {
-                Ok(response) => {
+                Ok(upstream_resp) => {
+                    let response = upstream_resp.response;
                     let status = response.status();
                     if !status.is_success() {
                         let err_text = response.text().await.unwrap_or_default();
@@ -1890,7 +1918,8 @@ pub async fn handle_images_edits(
                 .call_v1_internal("generateContent", &access_token, body, None)
                 .await
             {
-                Ok(response) => {
+                Ok(upstream_resp) => {
+                    let response = upstream_resp.response;
                     let status = response.status();
                     if !status.is_success() {
                         let err_text = response.text().await.unwrap_or_default();

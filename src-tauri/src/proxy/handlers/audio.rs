@@ -119,10 +119,13 @@ pub async fn handle_audio_transcription(
 
     // 8. 发送请求到 Gemini
     let upstream = state.upstream.clone();
-    let response = upstream
+    let upstream_resp = upstream
         .call_v1_internal("generateContent", &access_token, wrapped_body, None)
         .await
         .map_err(|e| (StatusCode::BAD_GATEWAY, format!("上游请求失败: {}", e)))?;
+
+    // 解构 UpstreamResponse
+    let response = upstream_resp.response;
 
     if !response.status().is_success() {
         let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());

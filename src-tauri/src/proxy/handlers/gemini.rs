@@ -39,6 +39,7 @@ pub async fn handle_generate(
             "kind": "original_request",
             "protocol": "gemini",
             "trace_id": trace_id,
+            "timestamp": debug_logger::get_iso_timestamp(),
             "original_model": model_name,
             "method": method,
             "request": body.clone(),
@@ -114,10 +115,14 @@ pub async fn handle_generate(
                 "kind": "v1internal_request",
                 "protocol": "gemini",
                 "trace_id": trace_id,
+                "timestamp": debug_logger::get_iso_timestamp(),
                 "original_model": model_name,
                 "mapped_model": mapped_model,
                 "request_type": config.request_type,
                 "attempt": attempt,
+                "account_email": email,
+                "project_id": project_id,
+                "session_id": session_id,
                 "v1internal_request": wrapped_body.clone(),
             });
             debug_logger::write_debug_payload(&debug_cfg, Some(&trace_id), "v1internal_request", &payload).await;
@@ -127,7 +132,7 @@ pub async fn handle_generate(
         let query_string = if is_stream { Some("alt=sse") } else { None };
         let upstream_method = if is_stream { "streamGenerateContent" } else { "generateContent" };
 
-        let response = match upstream
+        let upstream_resp = match upstream
             .call_v1_internal(upstream_method, &access_token, wrapped_body, query_string)
             .await {
                 Ok(r) => r,
@@ -137,6 +142,11 @@ pub async fn handle_generate(
                     continue;
                 }
             };
+
+        // 解构 UpstreamResponse 获取端点信息
+        let endpoint_url = upstream_resp.endpoint_url.clone();
+        let fallback_path = upstream_resp.fallback_path.clone();
+        let response = upstream_resp.response;
 
         let status = response.status();
         if status.is_success() {
@@ -155,6 +165,13 @@ pub async fn handle_generate(
                     "request_type": config.request_type,
                     "attempt": attempt,
                     "status": status.as_u16(),
+                    "endpoint_url": endpoint_url,
+                    "fallback_path": fallback_path,
+                    "account_email": email,
+                    "method": method,
+                    "query_string": query_string.unwrap_or(""),
+                    "force_stream_internally": force_stream_internally,
+                    "session_id": session_id,
                 });
                 let mut response_stream = debug_logger::wrap_reqwest_stream_with_debug(
                     Box::pin(response.bytes_stream()),
