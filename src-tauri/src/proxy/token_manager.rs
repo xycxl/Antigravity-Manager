@@ -2405,6 +2405,9 @@ impl TokenManager {
         std::fs::write(&path, json_str)
             .map_err(|e| format!("Failed to write account file: {}", e))?;
 
+        // [FIX] 从内存池中移除账号，避免重试时再次选中
+        self.remove_account(account_id);
+
         tracing::warn!(
             "🚫 Account {} marked as forbidden (403): {}",
             account_id,
