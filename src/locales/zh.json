@@ -768,10 +768,15 @@
                 "btn_view": "查看配置",
                 "btn_restore": "还原配置",
                 "btn_restore_backup": "从备份还原",
+                "btn_clear": "清除配置",
+                "clear_confirm_title": "确认清除配置",
+                "clear_confirm_message": "确定要清除 OpenCode 配置吗？这将删除配置文件。",
                 "toast": {
                     "config_missing": "请先生成 API Key 并启动服务",
                     "sync_success": "OpenCode 配置同步成功",
-                    "sync_error": "OpenCode 同步失败: {{error}}"
+                    "sync_error": "OpenCode 同步失败: {{error}}",
+                    "clear_success": "OpenCode 配置已清除",
+                    "clear_error": "清除 OpenCode 配置失败: {{error}}"
                 },
                 "modal": {
                     "view_title": "OpenCode 配置文件预览",
@@ -783,6 +788,7 @@
                 "restore_backup_confirm": "确定要从备份还原 OpenCode 配置吗？",
                 "modal_title": "选择 OpenCode 模型",
                 "select_models": "选择要同步的模型",
+                "auth_plugin_warning": "检测到 opencode-antigravity-auth 插件。同步仅会创建 antigravity-manager provider，不会覆盖 google provider/plugin。",
                 "btn_confirm_sync": "确认同步"
             },
             "droid_sync": {

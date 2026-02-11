@@ -242,10 +242,20 @@ claude
 
 ### 如何接入 OpenCode?
 1.  进入 **API 反代**页面 → **外部 Providers** → 点击 **OpenCode Sync** 卡片。
-2.  点击 **Sync** 按钮，将自动生成 `~/.config/opencode/opencode.json` 配置文件（包含代理 baseURL 与 apiKey，支持 Anthropic/Google 双 Provider）。
-3.  可选：勾选 **Sync accounts** 可同时导出 `antigravity-accounts.json` 账号列表，供 OpenCode 插件直接导入使用。
+2.  点击 **Sync** 按钮，将自动生成 `~/.config/opencode/opencode.json` 配置文件：
+    - 创建独立 provider `antigravity-manager`（不覆盖 google/anthropic 原生配置）
+    - 可选：勾选 **Sync accounts** 导出 `antigravity-accounts.json`（plugin-compatible v3 格式），供 OpenCode 插件直接导入
+3.  点击 **Clear Config** 可一键清除 Manager 配置并清理 legacy 残留；点击 **Restore** 可从备份恢复。
 4.  Windows 用户路径为 `C:\Users\<用户名>\.config\opencode\`（与 `~/.config/opencode` 规则一致）。
-5.  如需回滚，可点击 **Restore** 按钮从备份恢复之前的配置。
+
+**快速验证命令：**
+```bash
+# 测试 antigravity-manager provider（支持 --variant）
+opencode run "test" --model antigravity-manager/claude-sonnet-4-5-thinking --variant high
+
+# 若已安装 opencode-antigravity-auth 插件，验证 google provider 仍可独立工作
+opencode run "test" --model google/antigravity-claude-sonnet-4-5-thinking --variant max
+```
 
 ### 如何接入 Kilo Code?
 1.  **协议选择**: 建议优先使用 **Gemini 协议**。

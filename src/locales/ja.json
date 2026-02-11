@@ -780,10 +780,15 @@
         "btn_view": "設定を表示",
         "btn_restore": "復元",
         "btn_restore_backup": "バックアップから復元",
+        "btn_clear": "設定をクリア",
+        "clear_confirm_title": "設定のクリアを確認",
+        "clear_confirm_message": "OpenCode の設定をクリアしてもよろしいですか？設定ファイルが削除されます。",
         "toast": {
           "config_missing": "APIキーを生成し、サービスを先に起動してください",
           "sync_success": "OpenCode の設定を同期しました",
-          "sync_error": "OpenCode の同期に失敗しました: {{error}}"
+          "sync_error": "OpenCode の同期に失敗しました: {{error}}",
+          "clear_success": "OpenCode の設定をクリアしました",
+          "clear_error": "OpenCode の設定クリアに失敗しました: {{error}}"
         },
         "modal": {
           "view_title": "OpenCode 設定ビューアー",
@@ -792,7 +797,8 @@
         "sync_confirm_title": "同期の確認",
         "sync_confirm_message": "現在のプロキシ設定に基づき、OpenCode の設定が上書きされます。続行しますか？",
         "restore_confirm": "OpenCode をデフォルト設定に復元しますか？",
-        "restore_backup_confirm": "バックアップから OpenCode の設定を復元しますか？"
+        "restore_backup_confirm": "バックアップから OpenCode の設定を復元しますか？",
+        "auth_plugin_warning": "opencode-antigravity-auth プラグインを検出しました。同期では antigravity-manager provider のみ作成し、google provider/plugin は上書きしません。"
       },
       "droid_sync": {
         "modal_title": "Droid にモデルを追加",

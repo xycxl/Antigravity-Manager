@@ -230,10 +230,20 @@ claude
 
 ### How to use with OpenCode?
 1. Go to **API Proxy** → **External Providers** → click the **OpenCode Sync** card.
-2. Click **Sync** to generate `~/.config/opencode/opencode.json` with proxy baseURL and apiKey (supports both Anthropic and Google providers).
-3. Optional: Check **Sync accounts** to export `antigravity-accounts.json` for OpenCode plugin usage.
+2. Click **Sync** to generate `~/.config/opencode/opencode.json`:
+    - Creates a dedicated provider `antigravity-manager` (does not overwrite google/anthropic providers)
+    - Optional: Check **Sync accounts** to export `antigravity-accounts.json` (plugin-compatible v3 format) for the OpenCode plugin
+3. Click **Clear Config** to remove Manager configuration and clean up legacy entries; click **Restore** to revert from backup.
 4. On Windows, the path is `C:\Users\<User>\.config\opencode\` (same `~/.config/opencode` rule).
-5. Use the **Restore** button to revert from backup if needed.
+
+**Quick verification commands:**
+```bash
+# Test antigravity-manager provider (supports --variant)
+opencode run "test" --model antigravity-manager/claude-sonnet-4-5-thinking --variant high
+
+# If opencode-antigravity-auth is installed, verify google provider still works independently
+opencode run "test" --model google/antigravity-claude-sonnet-4-5-thinking --variant max
+```
 
 ### How to use in Python?
 ```python

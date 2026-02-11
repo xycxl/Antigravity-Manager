@@ -29,6 +29,7 @@ export function OpenCodeSyncModal({ proxyUrl, apiKey, onClose, onSyncDone }: Ope
     const [previewModels, setPreviewModels] = useState<PreviewModelEntry[]>([]);
     const [syncing, setSyncing] = useState(false);
     const [configLoaded, setConfigLoaded] = useState(false);
+    const [hasAuthPlugin, setHasAuthPlugin] = useState(false);
 
     const sensors = useSensors(
         useSensor(PointerSensor, { activationConstraint: { distance: 3 } }),
@@ -59,14 +60,27 @@ export function OpenCodeSyncModal({ proxyUrl, apiKey, onClose, onSyncDone }: Ope
             .then(content => {
                 const parsed = JSON.parse(content);
                 const existingModelIds = new Set<string>();
-                if (parsed.provider) {
-                    if (parsed.provider.anthropic?.models) {
+
+                // Priority 1: Read from antigravity-manager provider
+                if (parsed.provider?.['antigravity-manager']?.models) {
+                    Object.keys(parsed.provider['antigravity-manager'].models).forEach(k => existingModelIds.add(k));
+                }
+
+                // Fallback: legacy anthropic/google providers
+                if (existingModelIds.size === 0) {
+                    if (parsed.provider?.anthropic?.models) {
                         Object.keys(parsed.provider.anthropic.models).forEach(k => existingModelIds.add(k));
                     }
-                    if (parsed.provider.google?.models) {
+                    if (parsed.provider?.google?.models) {
                         Object.keys(parsed.provider.google.models).forEach(k => existingModelIds.add(k));
                     }
                 }
+
+                // Detect auth plugin conflict
+                const plugins = parsed.plugin || [];
+                const hasAuth = plugins.some((p: string) => p.includes('opencode-antigravity-auth'));
+                setHasAuthPlugin(hasAuth);
+
                 setSelectedModels(existingModelIds);
                 rebuildPreview(existingModelIds);
             })
@@ -191,6 +205,17 @@ export function OpenCodeSyncModal({ proxyUrl, apiKey, onClose, onSyncDone }: Ope
                         })}
                     </div>
                 </div>
+
+                {/* Auth Plugin Warning */}
+                {hasAuthPlugin && (
+                    <div className="px-5 py-2 shrink-0 bg-amber-50 dark:bg-amber-900/20 border-y border-amber-100 dark:border-amber-900/30">
+                        <p className="text-[10px] text-amber-700 dark:text-amber-400 leading-relaxed">
+                            {t('proxy.opencode_sync.auth_plugin_warning', {
+                                defaultValue: 'Sync chỉ tạo provider antigravity-manager và không ghi đè google provider/plugin.'
+                            })}
+                        </p>
+                    </div>
+                )}
 
                 {/* Preview 主体区 */}
                 <div className="flex-1 min-h-0 flex flex-col">

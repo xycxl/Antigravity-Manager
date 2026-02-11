@@ -27,6 +27,131 @@ use crate::proxy::common::client_adapter::CLIENT_ADAPTERS; // [NEW] Import Adapt
 use axum::http::HeaderMap;
 use std::sync::{atomic::Ordering, Arc};
 
+// ===== Task #6: OpenCode variants thinking config mapping =====
+// Helper structs for parsing thinking hints from raw JSON
+#[derive(Debug, Clone)]
+struct ThinkingHint {
+    budget_tokens: Option<u32>,
+    level: Option<String>,
+}
+
+/// Extract thinking hints from raw request JSON (OpenCode variants compatibility)
+/// Checks multiple possible paths for budget and level configuration
+fn extract_thinking_hint(body: &Value) -> ThinkingHint {
+    let mut hint = ThinkingHint {
+        budget_tokens: None,
+        level: None,
+    };
+
+    // Try to extract budget_tokens from various paths
+    // Priority: thinking.budget_tokens > thinking.budgetTokens > thinking.budget > thinkingConfig.thinkingBudget
+    if let Some(budget) = body
+        .get("thinking")
+        .and_then(|t| t.get("budget_tokens"))
+        .and_then(|b| b.as_u64())
+    {
+        hint.budget_tokens = Some(budget as u32);
+    } else if let Some(budget) = body
+        .get("thinking")
+        .and_then(|t| t.get("budgetTokens"))
+        .and_then(|b| b.as_u64())
+    {
+        hint.budget_tokens = Some(budget as u32);
+    } else if let Some(budget) = body
+        .get("thinking")
+        .and_then(|t| t.get("budget"))
+        .and_then(|b| b.as_u64())
+    {
+        hint.budget_tokens = Some(budget as u32);
+    } else if let Some(budget) = body
+        .get("thinkingConfig")
+        .and_then(|t| t.get("thinkingBudget"))
+        .and_then(|b| b.as_u64())
+    {
+        hint.budget_tokens = Some(budget as u32);
+    }
+
+    // Try to extract level from thinkingLevel
+    if let Some(level) = body.get("thinkingLevel").and_then(|l| l.as_str()) {
+        hint.level = Some(level.to_lowercase());
+    }
+
+    hint
+}
+
+/// Map thinking level to suggested budget tokens
+fn level_to_budget(level: &str) -> u32 {
+    match level {
+        "minimal" => 1024,
+        "low" => 8192,
+        "medium" => 16384,
+        "high" => 24576,
+        _ => 8192, // default to low
+    }
+}
+
+/// Map thinking level to effort level for output_config
+fn level_to_effort(level: &str) -> String {
+    match level {
+        "minimal" | "low" => "low".to_string(),
+        "medium" => "medium".to_string(),
+        "high" => "high".to_string(),
+        _ => "low".to_string(),
+    }
+}
+
+/// Apply thinking hints to ClaudeRequest
+fn apply_thinking_hints(
+    request: &mut crate::proxy::mappers::claude::models::ClaudeRequest,
+    hint: &ThinkingHint,
+    trace_id: &str,
+) {
+    let mut applied = false;
+
+    // If budget is provided, set/override thinking config
+    if let Some(budget) = hint.budget_tokens {
+        request.thinking = Some(crate::proxy::mappers::claude::models::ThinkingConfig {
+            type_: "enabled".to_string(),
+            budget_tokens: Some(budget),
+        });
+        tracing::debug!(
+            "[{}] Applied thinking hint: budget_tokens={}",
+            trace_id, budget
+        );
+        applied = true;
+    }
+
+    // If level is provided
+    if let Some(ref level) = hint.level {
+        // Map to output_config.effort if not already set
+        if request.output_config.is_none() {
+            request.output_config = Some(crate::proxy::mappers::claude::models::OutputConfig {
+                effort: Some(level_to_effort(level)),
+            });
+            tracing::debug!("[{}] Applied thinking hint: effort={}", trace_id, level);
+            applied = true;
+        }
+
+        // If no budget provided but level is, map level to budget
+        if hint.budget_tokens.is_none() {
+            let budget = level_to_budget(level);
+            request.thinking = Some(crate::proxy::mappers::claude::models::ThinkingConfig {
+                type_: "enabled".to_string(),
+                budget_tokens: Some(budget),
+            });
+            tracing::debug!(
+                "[{}] Applied thinking hint: level={} -> budget_tokens={}",
+                trace_id, level, budget
+            );
+            applied = true;
+        }
+    }
+
+    if applied {
+        tracing::info!("[{}] Applied OpenCode thinking hints to request", trace_id);
+    }
+}
+
 const MAX_RETRY_ATTEMPTS: usize = 3;
 
 // ===== Model Constants for Background Tasks =====
@@ -143,7 +268,7 @@ pub async fn handle_messages(
     let google_accounts = state.token_manager.len();
 
     // [CRITICAL REFACTOR] 优先解析请求以获取模型信息(用于智能兜底判断)
-    let mut request: crate::proxy::mappers::claude::models::ClaudeRequest = match serde_json::from_value(body) {
+    let mut request: crate::proxy::mappers::claude::models::ClaudeRequest = match serde_json::from_value(body.clone()) {
         Ok(r) => r,
         Err(e) => {
             return (
@@ -158,6 +283,10 @@ pub async fn handle_messages(
             ).into_response();
         }
     };
+
+    // [Task #6] Apply OpenCode variants thinking hints from raw JSON
+    let thinking_hint = extract_thinking_hint(&original_body);
+    apply_thinking_hints(&mut request, &thinking_hint, &trace_id);
 
     if debug_logger::is_enabled(&debug_cfg) {
         // [FIX] 使用原始 body 副本记录日志，确保不丢失任何字段

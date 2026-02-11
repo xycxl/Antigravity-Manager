@@ -13,7 +13,8 @@ import {
     RotateCcw,
     Copy,
     X,
-    Bot
+    Bot,
+    Trash2
 } from 'lucide-react';
 import { copyToClipboard } from '../../utils/clipboard';
 import { request as invoke } from '../../utils/request';
@@ -84,6 +85,7 @@ export const CliSyncCard = ({ proxyUrl, apiKey, className }: CliSyncCardProps) =
     const [restoreConfirmApp, setRestoreConfirmApp] = useState<CliAppType | null>(null);
     const [syncConfirmApp, setSyncConfirmApp] = useState<CliAppType | null>(null);
     const [openCodeSyncModal, setOpenCodeSyncModal] = useState(false);
+    const [clearConfirmApp, setClearConfirmApp] = useState<CliAppType | null>(null);
 
     const { models: proxyModels } = useProxyModels();
 
@@ -188,6 +190,28 @@ export const CliSyncCard = ({ proxyUrl, apiKey, className }: CliSyncCardProps) =
             await checkStatus(app);
         } catch (error: any) {
             showToast(error.toString(), 'error');
+        } finally {
+            setSyncing(prev => ({ ...prev, [app]: false }));
+        }
+    };
+
+    const handleClear = (app: CliAppType) => {
+        setClearConfirmApp(app);
+    };
+
+    const executeClear = async () => {
+        if (!clearConfirmApp) return;
+        const app = clearConfirmApp;
+        setClearConfirmApp(null);
+
+        setSyncing(prev => ({ ...prev, [app]: true }));
+        try {
+            const formattedUrl = getFormattedProxyUrl(app);
+            await invoke('execute_opencode_clear', { proxyUrl: formattedUrl, clearLegacy: true });
+            showToast(t('proxy.opencode_sync.toast.clear_success', { defaultValue: 'OpenCode cleared successfully' }), 'success');
+            await checkStatus(app);
+        } catch (error: any) {
+            showToast(t('proxy.opencode_sync.toast.clear_error', { defaultValue: `Clear failed: ${error.toString()}` }), 'error');
         } finally {
             setSyncing(prev => ({ ...prev, [app]: false }));
         }
@@ -345,6 +369,16 @@ export const CliSyncCard = ({ proxyUrl, apiKey, className }: CliSyncCardProps) =
                                 >
                                     <RotateCcw size={14} />
                                 </button>
+                                {/* OpenCode 独有的 Clear 按钮 */}
+                                {app === 'OpenCode' && (
+                                    <button
+                                        onClick={() => handleClear(app)}
+                                        className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+                                        title={t('proxy.opencode_sync.btn_clear', { defaultValue: 'Clear' })}
+                                    >
+                                        <Trash2 size={14} />
+                                    </button>
+                                )}
                             </>
                         )}
                         <button
@@ -472,6 +506,16 @@ export const CliSyncCard = ({ proxyUrl, apiKey, className }: CliSyncCardProps) =
                 message={syncConfirmApp ? t('proxy.cli_sync.sync_confirm_message', { name: syncConfirmApp }) : ''}
                 onConfirm={executeSync}
                 onCancel={() => setSyncConfirmApp(null)}
+                isDestructive={true}
+            />
+
+            {/* Clear 确认弹窗 - 仅 OpenCode */}
+            <ModalDialog
+                isOpen={!!clearConfirmApp}
+                title={t('proxy.opencode_sync.clear_confirm_title', { defaultValue: 'Clear OpenCode Configuration' })}
+                message={t('proxy.opencode_sync.clear_confirm_message', { defaultValue: 'This will clear all OpenCode configurations including legacy settings. Are you sure?' })}
+                onConfirm={executeClear}
+                onCancel={() => setClearConfirmApp(null)}
                 isDestructive={true}
             />
 

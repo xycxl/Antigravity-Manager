@@ -452,6 +452,7 @@ pub fn run() {
             proxy::opencode_sync::execute_opencode_sync,
             proxy::opencode_sync::execute_opencode_restore,
             proxy::opencode_sync::get_opencode_config_content,
+            proxy::opencode_sync::execute_opencode_clear,
             proxy::droid_sync::get_droid_sync_status,
             proxy::droid_sync::execute_droid_sync,
             proxy::droid_sync::execute_droid_restore,

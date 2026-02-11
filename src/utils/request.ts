@@ -71,6 +71,7 @@ const COMMAND_MAPPING: Record<string, { url: string; method: 'GET' | 'POST' | 'D
   'get_opencode_sync_status': { url: '/api/proxy/opencode/status', method: 'POST' },
   'execute_opencode_sync': { url: '/api/proxy/opencode/sync', method: 'POST' },
   'execute_opencode_restore': { url: '/api/proxy/opencode/restore', method: 'POST' },
+  'execute_opencode_clear': { url: '/api/proxy/opencode/clear', method: 'POST' },
   'get_opencode_config_content': { url: '/api/proxy/opencode/config', method: 'POST' },
 
   // Stats

@@ -777,10 +777,15 @@
                 "btn_view": "View Config",
                 "btn_restore": "Restore",
                 "btn_restore_backup": "Restore Backup",
+                "btn_clear": "Clear Config",
+                "clear_confirm_title": "Confirm Clear Config",
+                "clear_confirm_message": "Are you sure you want to clear OpenCode configuration? This will remove the config file.",
                 "toast": {
                     "config_missing": "Please generate API Key and start service first",
                     "sync_success": "OpenCode config synced successfully",
-                    "sync_error": "OpenCode sync failed: {{error}}"
+                    "sync_error": "OpenCode sync failed: {{error}}",
+                    "clear_success": "OpenCode config cleared successfully",
+                    "clear_error": "Failed to clear OpenCode config: {{error}}"
                 },
                 "modal": {
                     "view_title": "OpenCode Config Viewer",
@@ -792,6 +797,7 @@
                 "restore_backup_confirm": "Are you sure you want to restore OpenCode config from backup?",
                 "modal_title": "Select OpenCode Models",
                 "select_models": "Select models to sync",
+                "auth_plugin_warning": "Detected opencode-antigravity-auth plugin. Sync only creates provider antigravity-manager and will not overwrite the google provider/plugin.",
                 "btn_confirm_sync": "Confirm Sync"
             },
             "droid_sync": {
